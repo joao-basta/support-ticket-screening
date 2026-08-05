@@ -1,0 +1,19 @@
+# Caixa Log Diagnostic Pipeline (LDP) - Dependências
+# Ambiente Alvo: Local (Linux OS) / Python 3.10+
+
+# --- FASE 1: MVP (Ativa) ---
+# A Fase 1 opera inteiramente com a Standard Library do Python para garantir
+# máxima leveza e segurança sem dependências externas.
+# Bibliotecas utilizadas: re, json, sys, uuid, datetime, functools, typing.
+
+# --- FASE 2: Machine Learning & NLP (Futuro) ---
+# Descomente as linhas abaixo quando for implementar a inferência probabilística.
+# scikit-learn>=1.3.0  # modelagem de classificação[cite: 2]
+# numpy>=1.24.0        # operações matriciais[cite: 2]
+# nltk>=3.8.1          # lematização e remoção de stop-words[cite: 2]
+# spacy>=3.7.0         # alternativa recomendada para NLP avançado[cite: 2]
+
+scikit-learn>=1.3.0
+numpy>=1.24.0
+nltk>=3.8.1
+spacy>=3.7.0
