@@ -5,20 +5,24 @@ import re
 from datetime import datetime, timezone
 from typing import Generator, Dict, Any, TextIO, Tuple, List
 
+# 1. Importa os módulos de negócio (Clean Architecture)
 from core.anonymizer import mask_sensitive_data
 from engines.nlp_engine import infer_symptom_nlp
 
 # ---------------------------------------------------------
-# REGEX DE EVIDÊNCIAS (O "Segurança da Balada")
-# Compilados globalmente para evitar recálculo em loops (O(1)).
+# 2. REGEX DE EVIDÊNCIAS (O "Segurança da Balada")
+# As expressões são pré-compiladas no escopo global para evitar o custo
+# de recálculo em loops, garantindo performance O(1) na validação.
 # ---------------------------------------------------------
 PHONE_REGEX = re.compile(r'(?:\+?55\s*)?(?:\(?\d{2}\)?\s*)?\d{4,5}[-\s]?\d{4}')
 TIME_REGEX = re.compile(r'\b([0-1]?[0-9]|2[0-3])[:hH][0-5][0-9](?:[:][0-5][0-9])?\b')
 EVIDENCE_REGEX = re.compile(r'\b(anexo|anexado|print|imagem|tela|console|log)\b', re.IGNORECASE)
 
 # ---------------------------------------------------------
-# MATRIZ DE REQUISITOS (Validação Contextual)
-# Dicionário O(1) que mapeia o Sintoma -> Evidências Obrigatórias
+# 3. MATRIZ DE REQUISITOS (Validação Contextual)
+# Dicionário que mapeia o Sintoma (str) para uma lista de tuplas contendo
+# (Regex Compilado, Mensagem de Erro). A estrutura de dicionário (hash map)
+# garante um look-up de O(1) para as regras.
 # ---------------------------------------------------------
 CONTEXT_RULES = {
     'FALHA_CHAMADA_AUDIO': [
@@ -31,16 +35,20 @@ CONTEXT_RULES = {
     'FALHA_FILA_ROTEAMENTO': [
         (TIME_REGEX, "Horário da ocorrência")
     ],
-    'SINTOMA_DESCONHECIDO': [], # Se não sabe o que é, não tem como cobrar regra específica
+    # Se o sintoma não for reconhecido, não há como cobrar regras específicas.
+    'SINTOMA_DESCONHECIDO': [],
     'TEXTO_MUITO_CURTO': []
 }
 
 def validate_context(symptom: str, raw_text: str) -> Tuple[bool, List[str]]:
     """
-    Inspeciona o chamado buscando apenas as evidências necessárias para aquele sintoma específico.
-    Retorna um booleano de sucesso e a lista do que ficou faltando.
+    Inspeciona o texto do chamado buscando apenas as evidências necessárias
+    para o sintoma específico inferido pelo motor NLP.
+
+    Returns:
+        Uma tupla contendo um booleano de sucesso (True se válido) e a
+        lista de evidências que ficaram faltando.
     """
-    # Look-up em O(1) na tabela de regras
     rules = CONTEXT_RULES.get(symptom, [])
     missing_items = []
     
@@ -48,79 +56,54 @@ def validate_context(symptom: str, raw_text: str) -> Tuple[bool, List[str]]:
         if not pattern.search(raw_text):
             missing_items.append(error_msg)
             
+    # A validação é bem-sucedida se a lista de itens faltantes estiver vazia.
     return len(missing_items) == 0, missing_items
 
 def log_line_generator(file_stream: TextIO) -> Generator[str, None, None]:
-    """Gerador eficiente em memória para lidar com o input do terminal."""
+    """Gerador (Generator) para ler o input do terminal linha a linha de forma
+    eficiente, sem carregar todo o conteúdo em memória de uma vez."""
     for line in file_stream:
         clean_line = line.strip()
         if clean_line:
             yield clean_line
 
-def save_feedback(log_data: Dict[str, Any], is_correct: bool, correct_category: str = None) -> None:
-    """Persiste o feedback para treinar o ML no futuro."""
-    log_data["user_validated"] = is_correct
-    log_data["final_category"] = correct_category if not is_correct else log_data["inferred_category"]
-    
-    try:
-        with open("data/processed/dataset.jsonl", "a", encoding="utf-8") as f:
-            f.write(json.dumps(log_data) + "\n")
-    except IOError as e:
-        print(f"[ERRO DE IO] Falha ao salvar feedback: {e}", file=sys.stderr)
-
 def main() -> None:
+    """Função principal que orquestra o pipeline da CLI."""
     print("--- 2CX / Caixa Log Diagnostic Pipeline (NLP Engine) ---")
-    print("Cole o chamado e pressione Enter. Pressione Ctrl+C para sair.\n")
+    print("Cole o texto do chamado abaixo e pressione Enter. Use Ctrl+C para sair.\n")
 
     try:
         for raw_text in log_line_generator(sys.stdin):
-            # Passo 0: Sanitização (LGPD)
+            # Passo 0: Sanitização (LGPD) - Remove dados sensíveis antes de processar.
             anonymized = mask_sensitive_data(raw_text)
 
-            # Passo 1: Inferência de Sintoma via TF-IDF (Matemática)
+            # Passo 1: Inferência de Sintoma via TF-IDF (Motor NLP).
             symptom, score = infer_symptom_nlp(anonymized)
 
-            # Passo 2: Validação de Evidências (Fail Fast)
+            # Passo 2: Validação de Evidências (Fail Fast com base na matriz).
             is_valid, missing = validate_context(symptom, anonymized)
 
             # --- SAÍDA PARA O USUÁRIO ---
             print("\n" + "="*50)
-            print(f"[TEXTO LIDO] : {anonymized}")
-            print(f"[SINTOMA]    : {symptom} (Confiança: {score*100:.1f}%)")
+            print(f"[TEXTO ANALISADO] : {anonymized}")
+            print(f"[SINTOMA INFERIDO]: {symptom} (Confiança: {score*100:.1f}%)")
             
             if not is_valid:
                 print(f"[STATUS]     : ❌ BLOQUEADO - FALTAM DADOS")
-                print(f"[AÇÃO]       : Devolver chamado solicitando: {', '.join(missing)}")
+                # Concatena os itens faltantes em uma string clara para o usuário.
+                print(f"[AÇÃO NECESSÁRIA] : Devolver chamado ao solicitante cobrando: {', '.join(missing)}")
             else:
                 if symptom in ['SINTOMA_DESCONHECIDO', 'TEXTO_MUITO_CURTO']:
-                    print(f"[STATUS]     : ⚠️ NECESSITA ANÁLISE HUMANA TOTAL")
+                    print(f"[STATUS]     : ⚠️ ATENÇÃO - ANÁLISE HUMANA NECESSÁRIA")
+                    print(f"[AÇÃO NECESSÁRIA] : Investigar manualmente. O sintoma não foi reconhecido.")
                 else:
-                    print(f"[STATUS]     : ✅ PRONTO PARA ANÁLISE NO MANAGER")
+                    print(f"[STATUS]     : ✅ SUCESSO - PRONTO PARA ANÁLISE TÉCNICA")
+                    print(f"[AÇÃO NECESSÁRIA] : Prosseguir com a investigação do problema no Manager.")
 
-            print("="*50)
-
-            # Passo 3: Loop de Feedback
-            feedback = input("\nO sintoma deduzido está correto? (Y/N): ").strip().upper()
-            
-            log_data = {
-                "id": str(uuid.uuid4()),
-                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                "raw_text": anonymized,
-                "inferred_category": symptom,
-                "confidence_score": score,
-                "missing_evidences": missing
-            }
-
-            if feedback == 'Y':
-                save_feedback(log_data, True)
-                print("[+] Arquivado no Dataset de Ouro.\n")
-            else:
-                correct_cat = input(f"Categorias válidas: {list(CONTEXT_RULES.keys())}\nQual é o sintoma correto?: ").strip().upper()
-                save_feedback(log_data, False, correct_cat)
-                print("[+] Correção aprendida e arquivada.\n")
+            print("="*50 + "\n")
 
     except KeyboardInterrupt:
-        print("\n\nEncerrando Pipeline com segurança. Bom descanso!")
+        print("\n\nPipeline encerrado pelo usuário. Bom descanso!")
         sys.exit(0)
 
 if __name__ == "__main__":
