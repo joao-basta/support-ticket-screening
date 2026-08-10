@@ -59,52 +59,61 @@ def validate_context(symptom: str, raw_text: str) -> Tuple[bool, List[str]]:
     # A validação é bem-sucedida se a lista de itens faltantes estiver vazia.
     return len(missing_items) == 0, missing_items
 
-def log_line_generator(file_stream: TextIO) -> Generator[str, None, None]:
-    """Gerador (Generator) para ler o input do terminal linha a linha de forma
-    eficiente, sem carregar todo o conteúdo em memória de uma vez."""
-    for line in file_stream:
-        clean_line = line.strip()
-        if clean_line:
-            yield clean_line
-
 def main() -> None:
     """Função principal que orquestra o pipeline da CLI."""
     print("--- 2CX / Caixa Log Diagnostic Pipeline (NLP Engine) ---")
     print("Cole o texto do chamado abaixo e pressione Enter. Use Ctrl+C para sair.\n")
 
     try:
-        for raw_text in log_line_generator(sys.stdin):
-            # Passo 0: Sanitização (LGPD) - Remove dados sensíveis antes de processar.
-            anonymized = mask_sensitive_data(raw_text)
+            while True:
+                print("\n" + "-"*50)
+                print("Cole o chamado abaixo.")
+                print("(Para analisar, digite FIM em uma nova linha e aperte Enter)")
+                print("-" * 50)
+                
+                linhas = []
+                while True:
+                    linha = input()
+                    if linha.strip().upper() == 'FIM':
+                        break
+                    linhas.append(linha)
+                    
+                raw_text = " ".join(linhas) # Junta tudo em um bloco único
+                
+                if not raw_text.strip():
+                    continue
 
-            # Passo 1: Inferência de Sintoma via TF-IDF (Motor NLP).
-            symptom, score = infer_symptom_nlp(anonymized)
+                # Passo 0: Sanitização (LGPD)
+                anonymized = mask_sensitive_data(raw_text)
 
-            # Passo 2: Validação de Evidências (Fail Fast com base na matriz).
-            is_valid, missing = validate_context(symptom, anonymized)
+                # Passo 1: Inferência de Sintoma via TF-IDF (Matemática)
+                symptom, score = infer_symptom_nlp(anonymized)
 
-            # --- SAÍDA PARA O USUÁRIO ---
-            print("\n" + "="*50)
-            print(f"[TEXTO ANALISADO] : {anonymized}")
-            print(f"[SINTOMA INFERIDO]: {symptom} (Confiança: {score*100:.1f}%)")
-            
-            if not is_valid:
-                print(f"[STATUS]     : ❌ BLOQUEADO - FALTAM DADOS")
-                # Concatena os itens faltantes em uma string clara para o usuário.
-                print(f"[AÇÃO NECESSÁRIA] : Devolver chamado ao solicitante cobrando: {', '.join(missing)}")
-            else:
-                if symptom in ['SINTOMA_DESCONHECIDO', 'TEXTO_MUITO_CURTO']:
-                    print(f"[STATUS]     : ⚠️ ATENÇÃO - ANÁLISE HUMANA NECESSÁRIA")
-                    print(f"[AÇÃO NECESSÁRIA] : Investigar manualmente. O sintoma não foi reconhecido.")
+                # Passo 2: Validação de Evidências (Fail Fast)
+                is_valid, missing = validate_context(symptom, anonymized)
+                
+                # ... (Aqui continua os seus prints normais de [TEXTO LIDO], [SINTOMA], etc)
+                print("\n" + "="*50)
+                print(f"[TEXTO ANALISADO] : {anonymized}")
+                print(f"[SINTOMA INFERIDO]: {symptom} (Confiança: {score*100:.1f}%)")
+                
+                if not is_valid:
+                    print(f"[STATUS]     : ❌ BLOQUEADO - FALTAM DADOS")
+                    # Concatena os itens faltantes em uma string clara para o usuário.
+                    print(f"[AÇÃO NECESSÁRIA] : Devolver chamado ao solicitante cobrando: {', '.join(missing)}")
                 else:
-                    print(f"[STATUS]     : ✅ SUCESSO - PRONTO PARA ANÁLISE TÉCNICA")
-                    print(f"[AÇÃO NECESSÁRIA] : Prosseguir com a investigação do problema no Manager.")
+                    if symptom in ['SINTOMA_DESCONHECIDO', 'TEXTO_MUITO_CURTO']:
+                        print(f"[STATUS]     : ⚠️ ATENÇÃO - ANÁLISE HUMANA NECESSÁRIA")
+                        print(f"[AÇÃO NECESSÁRIA] : Investigar manualmente. O sintoma não foi reconhecido.")
+                    else:
+                        print(f"[STATUS]     : ✅ SUCESSO - PRONTO PARA ANÁLISE TÉCNICA")
+                        print(f"[AÇÃO NECESSÁRIA] : Prosseguir com a investigação do problema no Manager.")
 
-            print("="*50 + "\n")
+                print("="*50 + "\n")
 
     except KeyboardInterrupt:
-        print("\n\nPipeline encerrado pelo usuário. Bom descanso!")
-        sys.exit(0)
+            print("\n\nPipeline encerrado pelo usuário. Bom descanso!")
+            sys.exit(0)
 
 if __name__ == "__main__":
     main()

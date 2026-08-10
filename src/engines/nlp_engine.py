@@ -15,11 +15,11 @@ ANCHOR_DATA = {
         "sistema congelou relatorio nao carrega pagina"
     ),
     'FALHA_CHAMADA_AUDIO': (
-        "ligacao desligou no meio voz muda picotando chamada robotica audio "
-        "cortando delay atraso telefone cliente sem som"
+        "ligacao desligou no meio voz muda mudo picotando chamada robotica audio "
+        "cortando delay atraso telefone cliente sem som caiu softphone"
     ),
     'FALHA_FILA_ROTEAMENTO': (
-        "agentes disponiveis e clientes na fila cliente nao entra travada "
+        "agentes disponiveis clientes na fila cliente nao entra travada "
         "roteamento pausa indevida nao loga skill errada"
     )
 }
@@ -36,8 +36,8 @@ ANCHOR_TEXTS: List[str] = list(ANCHOR_DATA.values())
 # ---------------------------------------------------------
 vectorizer = TfidfVectorizer(
     lowercase=True, 
-    # Basic Portuguese stop words to filter out noise.
-    stop_words=['o', 'a', 'e', 'do', 'da', 'no', 'na', 'que', 'com', 'um', 'uma']
+    strip_accents='unicode', 
+    stop_words=['o', 'a', 'e', 'do', 'da', 'no', 'na', 'que', 'com', 'um', 'uma', 'de', 'para', 'em']
 )
 anchor_matrix = vectorizer.fit_transform(ANCHOR_TEXTS)
 
