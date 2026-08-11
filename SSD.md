@@ -13,17 +13,19 @@ O LDP é uma ferramenta CLI (Command Line Interface) construída em Python para 
 
 ### 3. Arquitetura do Sistema (Clean Architecture)
 O projeto é modularizado para separar responsabilidades:
-* `/src/cli.py` -> **Orquestrador.** Gerencia o fluxo de entrada/saída, lê os arquivos e aplica as regras de validação (Fail Fast).
+* `/src/cli.py` -> **Orquestrador.** Gerencia o fluxo de entrada/saída (via argumentos de linha de comando ou modo interativo legado) e aplica as regras de validação (Fail Fast).
+* `/src/core/ticket_source.py` -> **Fonte de Chamado (Port & Adapter).** Define o contrato `TicketSource` e o adapter `LocalTicketSource`, que lê texto e anexos do disco (incluindo extração de `.zip`). Um futuro adapter de API do Service Desk implementa o mesmo contrato sem exigir mudanças no restante do pipeline.
 * `/src/core/anonymizer.py` -> **Módulo de Segurança.** Intercepta o texto bruto e mascara CPFs, CNPJs, Telefones e Dados Bancários.
 * `/src/engines/nlp_engine.py` -> **Cérebro (Intenção).** Transforma o texto do chamado em vetores matemáticos para classificar o Sintoma relatado ignorando erros de digitação.
+* `/src/engines/log_analyzer.py` -> **Perícia Técnica.** Varre os logs `.txt` anexados buscando assinaturas de erro reais por sintoma e compara a causa técnica dominante com o sintoma inferido pelo NLP.
 * `/tests/mock_generator.py` -> **Fábrica de Caos.** Gera massa de dados sintética (chamados e logs falsos) para testes unitários isolados.
 
 ### 4. Fluxo de Execução (Pipeline Flow)
 O sistema processa a informação na seguinte ordem cronológica:
 1. **Sanitização (Passo 0):** O texto do chamado é mascarado.
-2. **Classificação de Sintoma (Passo 1):** O `nlp_engine.py` lê o texto e deduz o problema com um *Score de Confiança* (> 85%).
-3. **Validação Contextual (Passo 2):** Baseado no sintoma inferido, o `cli.py` usa Regex para buscar as evidências vitais (Ex: se for erro de áudio, cobra Horário e Telefone obrigatoriamente).
-4. **Análise de Arquivo (Passo 3):** Lê o log `.txt` anexado buscando Códigos de Erro reais (Ex: HTTP 500, Jitter).
+2. **Classificação de Sintoma (Passo 1):** O `nlp_engine.py` lê o texto e deduz o problema por Similaridade de Cosseno (TF-IDF) contra um corpus de âncoras; o sintoma com maior *Score de Confiança* vence, desde que acima do limiar de 0.15 (abaixo disso, o texto tem pouco em comum com qualquer sintoma conhecido e é classificado como `SINTOMA_DESCONHECIDO`).
+3. **Validação Contextual (Passo 2):** Baseado no sintoma inferido, o `cli.py` usa Regex para buscar as evidências vitais no texto anonimizado E nos anexos resolvidos (Ex: se for erro de áudio, cobra Horário e Telefone obrigatoriamente; se for erro de UX, aceita menção textual OU anexo visual/log como evidência).
+4. **Análise de Arquivo (Passo 3):** `engines/log_analyzer.py` lê os logs `.txt` anexados (inclusive extraídos de `.zip`) buscando Códigos de Erro reais (Ex: HTTP 5xx, Jitter, ACD Queue Overflow) e sinaliza no relatório se a causa técnica dominante do log diverge do sintoma relatado no texto (sem bloquear o chamado por isso).
 5. **Output / Feedback:** Retorna a ação sugerida ao analista (Bloquear chamado por falta de dados ou Avançar para análise profunda).
 
 ### 5. Matriz de Validação (Sintoma x Evidência)
