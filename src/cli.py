@@ -192,6 +192,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    # No Windows, o console usa por padrão a codepage legada (cp1252), que não
+    # suporta os emojis do relatório (✅/❌/⚠️) nem acentos em alguns terminais.
+    # Força stdout/stderr para UTF-8 para evitar UnicodeEncodeError.
+    if sys.stdout.encoding is not None and sys.stdout.encoding.lower() != 'utf-8':
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+
     parser = build_arg_parser()
     args = parser.parse_args()
 
