@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from core.anonymizer import mask_sensitive_data, TELEFONE_MASK
-from core.ticket_source import AttachmentBundle, LocalTicketSource, Ticket, classify_attachments
+from core.ticket_source import ApiTicketSource, AttachmentBundle, LocalTicketSource, Ticket, classify_attachments
 from engines.log_analyzer import LogAnalysisResult, analyze_logs
 from engines.nlp_engine import infer_symptom_nlp
 
@@ -184,6 +184,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
                          help="Anexos: logs .txt, screenshots .png/.jpg/.pdf, ou .zip")
     parser.add_argument('--interactive', action='store_true',
                          help="Modo legado: cola o texto do chamado interativamente no terminal")
+    text_source.add_argument('--api-source', action='store_true',
+                              help="[STUB] Usa o adapter ApiTicketSource: simula um chamado vindo da "
+                                   "API do Service Desk (Fase 3 - RPA) a partir do pool de mocks em "
+                                   "data/raw/, gerado por tests/mock_generator.py")
     return parser
 
 
@@ -195,8 +199,15 @@ def main() -> None:
         run_interactive_loop()
         sys.exit(EXIT_SUCCESS)
 
+    if args.api_source:
+        print("--- 2CX / Caixa Log Diagnostic Pipeline (NLP Engine) ---")
+        with ApiTicketSource() as source:
+            ticket = source.load()
+            exit_code = process_ticket(ticket)
+        sys.exit(exit_code)
+
     if not args.text and not args.text_file:
-        parser.error("informe --text, --text-file ou --interactive")
+        parser.error("informe --text, --text-file, --api-source ou --interactive")
 
     print("--- 2CX / Caixa Log Diagnostic Pipeline (NLP Engine) ---")
     with LocalTicketSource(text=args.text, text_file=args.text_file,
