@@ -22,6 +22,12 @@ TELEFONE_MASK_REGEX = re.compile(re.escape(TELEFONE_MASK))
 
 TextCheck = Callable[[str, Sequence[Path]], bool]
 
+# Cabeçalho que marca o fim do relato do chamado no layout real do GLPI.
+# Tudo a partir dele é ruído burocrático (dados de QUEM ligou, não do
+# agente/telefone AFETADO) e deve ser descartado antes do NLP/Regex para
+# evitar falso positivo com o ID do solicitante.
+SOLICITANTE_HEADER = 'Info Solicitante:'
+
 UNRESOLVED_SYMPTOMS = {'SINTOMA_DESCONHECIDO', 'TEXTO_MUITO_CURTO'}
 
 EXIT_SUCCESS = 0
@@ -129,8 +135,13 @@ def print_report(ticket: Ticket, anonymized: str, symptom: str, score: float,
 def process_ticket(ticket: Ticket) -> int:
     """Orquestra os 4 passos do pipeline (Sanitização, NLP, Validação Contextual
     e Análise de Log) sobre um Ticket já carregado, e imprime o relatório."""
+    # Trunca em 'Info Solicitante:': tudo dali pra baixo é ruído burocrático
+    # (dados de QUEM ligou, não do agente/telefone AFETADO) e geraria falso
+    # positivo nas regex de evidência se fosse repassado ao NLP.
+    relevant_text = ticket.raw_text.split(SOLICITANTE_HEADER, 1)[0]
+
     # Passo 0: Sanitização (LGPD)
-    anonymized = mask_sensitive_data(ticket.raw_text)
+    anonymized = mask_sensitive_data(relevant_text)
 
     # Passo 1: Inferência de Sintoma via TF-IDF (Matemática)
     symptom, score = infer_symptom_nlp(anonymized)

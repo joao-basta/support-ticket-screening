@@ -1,5 +1,6 @@
 import os
 import random
+import string
 import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
@@ -17,9 +18,21 @@ def _generate_fake_cnpj() -> str:
     """Generate a fake CNPJ number in the XX.XXX.XXX/0001-XX format."""
     return f"{random.randint(10, 99)}.{random.randint(100, 999)}.{random.randint(100, 999)}/0001-{random.randint(10, 99)}"
 
-def _generate_fake_phone() -> str:
-    """Generate a fake mobile phone number in the (XX) 9XXXX-XXXX format."""
+def _generate_fake_phone_formatted() -> str:
+    """Generate a fake mobile phone number in the (XX) 9XXXX-XXXX format (with DDD/parens)."""
     return f"({random.randint(11, 99)}) 9{random.randint(1000, 9999)}-{random.randint(1000, 9999)}"
+
+def _generate_fake_phone_raw() -> str:
+    """Generate a fake mobile number as a bare digit run, no DDD/parens/dashes
+    (mirrors real GLPI tickets where the phone is pasted straight from the PABX log,
+    e.g. '987654321')."""
+    digit_count = random.choice([9, 10])
+    return f"9{''.join(str(random.randint(0, 9)) for _ in range(digit_count - 1))}"
+
+def _generate_fake_phone() -> str:
+    """Generate a fake phone number, mostly formatted but occasionally a bare digit
+    run, matching the variety seen in real tickets."""
+    return _generate_fake_phone_formatted() if random.random() < 0.7 else _generate_fake_phone_raw()
 
 def _generate_fake_agent_id() -> str:
     """Generate a fake agent registration ID in the pXXXXXX format."""
@@ -36,6 +49,15 @@ def _generate_fake_name() -> str:
 def _generate_fake_request_number() -> str:
     """Generate a fake GLPI-style request number (12 digits)."""
     return "".join(str(random.randint(0, 9)) for _ in range(12))
+
+def _generate_fake_bank_code() -> str:
+    """Generate a fake bank/branch code in the digit-letter-digit format (e.g. '1X4'),
+    mirroring the 'codigodobanco' field of real tickets."""
+    return f"{random.randint(0, 9)}{random.choice(string.ascii_uppercase)}{random.randint(0, 9)}"
+
+def _generate_fake_contract_number() -> str:
+    """Generate a fake supplier contract number."""
+    return f"CT-{random.randint(100000, 999999)}"
 
 # ---------------------------------------------------------
 # 2. DATA POOLS (pt-BR content)
@@ -97,8 +119,23 @@ CITIES: List[str] = [
     "Curitiba, PR", "Recife, PE",
 ]
 
+DEPARTMENTS: List[str] = [
+    "TI Corporativo", "Atendimento ao Cliente", "Operações Central",
+    "Recursos Humanos", "Financeiro Matriz", "Telefonia / VOIP",
+]
+
+SUPPLIERS: List[str] = [
+    "Alpha Telecom", "Beta Sistemas Ltda", "Gamma Infraestrutura",
+    "Delta Soluções TI", "Ômega Redes Corporativas",
+]
+
+ANEXO_OPTIONS: List[str] = [
+    "print_tela_erro.png", "log_chamada.txt", "evidencia.pdf",
+    "Nenhum anexo informado", "captura_console.png",
+]
+
 # ---------------------------------------------------------
-# 3. FORMAL ISSUE DESCRIPTIONS (Chunk 1 / detalhe1)
+# 3. FORMAL ISSUE DESCRIPTIONS (Detalhes: / detalhe1)
 # Verbose, bureaucratic phrasing that embeds the AFFECTED
 # agent ID and AFFECTED phone number, mirroring real tickets.
 # ---------------------------------------------------------
@@ -161,13 +198,25 @@ TECHNICAL_ROOT_CAUSE: Dict[str, List[str]] = {
 }
 
 # ---------------------------------------------------------
-# 5. BUREAUCRATIC NOISE (Chunks 2 & 3)
-# Each generator produces one unrelated "detalhe" line meant
-# to trap naive regex extraction.
+# 5. DETALHES NOISE POOL (detalhe2 .. detalhe11)
+# Each generator produces one unrelated value meant to trap
+# naive regex extraction (locations, decoy phones, IDs, ...).
 # ---------------------------------------------------------
+
+def _noise_location() -> str:
+    return random.choice(SERVER_LOCATIONS)
 
 def _noise_cnpj() -> str:
     return _generate_fake_cnpj()
+
+def _noise_cpf() -> str:
+    return _generate_fake_cpf()
+
+def _noise_name() -> str:
+    return _generate_fake_name()
+
+def _noise_category() -> str:
+    return random.choice(INCIDENT_CATEGORIES)
 
 def _noise_address() -> str:
     return f"{random.choice(STREET_NAMES)}, {random.randint(1, 9999)} - {random.choice(CITIES)}"
@@ -190,64 +239,106 @@ def _noise_hardware() -> str:
 def _noise_channel() -> str:
     return random.choice(CHANNEL_OPTIONS)
 
-BUREAUCRATIC_NOISE_GENERATORS = [
-    _noise_cnpj, _noise_address, _noise_sla, _noise_status,
-    _noise_os, _noise_ip, _noise_hardware, _noise_channel,
+def _noise_decoy_phone() -> str:
+    return _generate_fake_phone_formatted()
+
+def _noise_decoy_tel_raw() -> str:
+    return f"TEL: {_generate_fake_phone_raw()}"
+
+DETALHES_NOISE_GENERATORS = [
+    _noise_cnpj, _noise_cpf, _noise_name, _noise_category, _noise_address,
+    _noise_sla, _noise_status, _noise_os, _noise_ip, _noise_hardware,
+    _noise_channel, _noise_decoy_phone, _noise_decoy_tel_raw,
 ]
 
-def _generate_noise_chunk(min_lines: int = 3, max_lines: int = 6) -> str:
-    """Build a bureaucratic noise chunk (CNPJ, IPs, OS, SLA, ...) with sequential detalheN--> lines."""
-    line_count = random.randint(min_lines, min(max_lines, len(BUREAUCRATIC_NOISE_GENERATORS)))
-    generators = random.sample(BUREAUCRATIC_NOISE_GENERATORS, k=line_count)
-    lines = [f"detalhe{i + 1}--> {gen()}" for i, gen in enumerate(generators)]
-    return "\n".join(lines)
-
 # ---------------------------------------------------------
-# 6. CHUNK 1 BUILDER (Strict Layout)
-# detalhe1 = affected agent/phone description
-# detalhe2-6 = regex-trap noise (name, caller id, cpf, category, decoy phone)
-# detalhe7 = server location
+# 6. TICKET BLOCK BUILDERS (real GLPI layout)
+# Headers + 'chave -> valor' lines, delimiter is ' -> ' (space,
+# single dash, greater-than). Blocks are joined with a blank line.
 # ---------------------------------------------------------
 
-def _generate_chunk1(symptom: str) -> Tuple[str, str, str]:
-    """Build the strict first chunk and return it along with the affected agent ID/phone (Ctrl+F anchor for the log)."""
+def _generate_detalhes_block(symptom: str) -> Tuple[str, str, str]:
+    """Build the 'Detalhes:' block (detalhe1..detalhe11) and return it along
+    with the AFFECTED agent ID/phone (Ctrl+F anchor for the log)."""
     affected_agent_id = _generate_fake_agent_id()
     affected_phone = _generate_fake_phone()
-
-    caller_agent_id = _generate_fake_agent_id()
-    while caller_agent_id == affected_agent_id:
-        caller_agent_id = _generate_fake_agent_id()
-
-    decoy_phone = _generate_fake_phone()
 
     issue_description = random.choice(FORMAL_ISSUE_TEMPLATES[symptom]).format(
         agent_id=affected_agent_id, phone=affected_phone
     )
 
-    lines = [
-        f"detalhe1--> {issue_description}",
-        f"detalhe2--> {_generate_fake_name()}",
-        f"detalhe3--> {caller_agent_id}",
-        f"detalhe4--> {_generate_fake_cpf()}",
-        f"detalhe5--> {random.choice(INCIDENT_CATEGORIES)}",
-        f"detalhe6--> {decoy_phone}",
-        f"detalhe7--> {random.choice(SERVER_LOCATIONS)}",
+    # detalhe2..detalhe11: at least one location (e.g. "Juiz de Fora"), the rest
+    # sampled from the wider noise pool so decoy IDs/phones don't always land
+    # in the same slot.
+    noise_values = [_noise_location()] + [
+        gen() for gen in random.choices(DETALHES_NOISE_GENERATORS, k=9)
     ]
-    return "\n".join(lines), affected_agent_id, affected_phone
+    random.shuffle(noise_values)
+
+    lines = [f"detalhe1 -> {issue_description}"]
+    lines.extend(f"detalhe{i} -> {value}" for i, value in enumerate(noise_values, start=2))
+
+    return "Detalhes:\n" + "\n".join(lines), affected_agent_id, affected_phone
+
+def _generate_info_solicitante_block() -> str:
+    """Build the 'Info Solicitante:' block: the CALLER's own contact info.
+    Everything from this header down is bureaucratic noise that the
+    orchestrator must discard before handing the text to NLP/Regex."""
+    lines = [
+        f"contatonome -> {_generate_fake_name()}",
+        f"contatotelefone -> {_generate_fake_phone()}",
+        f"contatoemail -> {_generate_fake_agent_id()}@corp.caixa.gov.br",
+    ]
+    return "Info Solicitante:\n" + "\n".join(lines)
+
+def _generate_categorizacao_block() -> str:
+    lines = [
+        f"categoria -> {random.choice(INCIDENT_CATEGORIES)}",
+        f"sla -> {random.choice(SLA_OPTIONS)}",
+        f"canalabertura -> {random.choice(CHANNEL_OPTIONS)}",
+        f"codigodobanco -> {_generate_fake_bank_code()}",
+    ]
+    return "Categorizacao:\n" + "\n".join(lines)
+
+def _generate_info_demandante_block() -> str:
+    lines = [
+        f"areasolicitante -> {random.choice(DEPARTMENTS)}",
+        f"matriculademandante -> {_generate_fake_agent_id()}",
+    ]
+    return "Info Demandante:\n" + "\n".join(lines)
+
+def _generate_info_arquivo_block() -> str:
+    lines = [
+        f"anexo -> {random.choice(ANEXO_OPTIONS)}",
+    ]
+    return "Info Arquivo:\n" + "\n".join(lines)
+
+def _generate_info_fornecedor_block() -> str:
+    lines = [
+        f"fornecedor -> {random.choice(SUPPLIERS)}",
+        f"contrato -> {_generate_fake_contract_number()}",
+    ]
+    return "Info Fornecedor:\n" + "\n".join(lines)
 
 # ---------------------------------------------------------
 # 7. TICKET & LOG ASSEMBLY
 # ---------------------------------------------------------
 
 def _build_ticket(symptom: str) -> Tuple[str, str, str]:
-    """Assemble the full ticket body (chunk1 + at least two noise chunks) and return the affected agent ID/phone."""
-    chunk1, affected_agent_id, affected_phone = _generate_chunk1(symptom)
-    chunks = [chunk1, _generate_noise_chunk(), _generate_noise_chunk()]
+    """Assemble the full ticket body (all blocks, real header order) and
+    return it along with the AFFECTED agent ID/phone."""
+    detalhes_block, affected_agent_id, affected_phone = _generate_detalhes_block(symptom)
 
-    for _ in range(random.randint(0, 2)):
-        chunks.append(_generate_noise_chunk())
+    blocks = [
+        detalhes_block,
+        _generate_info_solicitante_block(),
+        _generate_categorizacao_block(),
+        _generate_info_demandante_block(),
+        _generate_info_arquivo_block(),
+        _generate_info_fornecedor_block(),
+    ]
 
-    ticket_text = "\n\n".join(chunks)
+    ticket_text = "\n\n".join(blocks)
     return ticket_text, affected_agent_id, affected_phone
 
 LOG_SKILLS: List[str] = ["Vendas_Premium", "Suporte_N1", "Retenção", "Financeiro", "Cobranca_Ativa", "SAC_Geral"]

@@ -32,8 +32,10 @@ PATTERNS = {
     # Máscara para Valores Financeiros (R$ XX.XXX,XX)
     r'(?i)R\$\s*\d{1,3}(?:\.\d{3})*,\d{2}\b': VALOR_MASK,
 
-    # Máscara para Telefones (com ou sem DDI/DDD, fixo ou celular)
-    r'(?:\+?55\s*)?(?:\(?\d{2}\)?\s*)?\d{4,5}[-\s]?\d{4}\b': TELEFONE_MASK,
+    # Máscara para Telefones (com ou sem DDI/DDD/parênteses, fixo ou celular).
+    # O bloco final aceita 3-5 + 4-5 dígitos para também cobrir números sem DDD
+    # digitados corridos (ex: "987654321", "TEL: 9876543210").
+    r'(?:\+?55\s*)?(?:\(?\d{2}\)?\s*)?\d{3,5}[-\s]?\d{4,5}\b': TELEFONE_MASK,
 }
 
 # Lista de tuplas (RegEx Compilado, Token de Substituição)
