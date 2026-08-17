@@ -30,6 +30,13 @@ venv/
 .env/
 .venv/
 
+# Test & coverage artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
 # IDE configuration
 .vscode/
 .idea/
