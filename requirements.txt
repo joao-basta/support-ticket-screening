@@ -1,19 +1,21 @@
-# Caixa Log Diagnostic Pipeline (LDP) - Dependências
-# Ambiente Alvo: Local (Linux OS) / Python 3.10+
+# Caixa Log Diagnostic Pipeline (LDP) - dependências de execução
+#
+# A instalação canônica é `pip install -e .` (ver pyproject.toml). Este arquivo
+# existe para ambientes que exigem requirements.txt e deve espelhar o pyproject.
+#
+# Ambiente alvo: Python 3.10+ (validado em 3.12). O pipeline roda 100% offline:
+# nenhuma dependência abaixo faz chamada de rede em tempo de execução.
 
-# --- FASE 1: MVP (Ativa) ---
-# A Fase 1 opera inteiramente com a Standard Library do Python para garantir
-# máxima leveza e segurança sem dependências externas.
-# Bibliotecas utilizadas: re, json, sys, uuid, datetime, functools, typing.
-
-# --- FASE 2: Machine Learning & NLP (Futuro) ---
-# Descomente as linhas abaixo quando for implementar a inferência probabilística.
-# scikit-learn>=1.3.0  # modelagem de classificação[cite: 2]
-# numpy>=1.24.0        # operações matriciais[cite: 2]
-# nltk>=3.8.1          # lematização e remoção de stop-words[cite: 2]
-# spacy>=3.7.0         # alternativa recomendada para NLP avançado[cite: 2]
-
+# --- Motor NLP (Passo 1) ---
 scikit-learn>=1.3.0
 numpy>=1.24.0
-nltk>=3.8.1
-spacy>=3.7.0
+
+# --- API HTTP (Fase 7) ---
+# Flask 3.x é obrigatório: a série 2.3 lê `werkzeug.__version__`, atributo que o
+# Werkzeug 3 removeu, e o par antigo quebra ao criar um test client.
+Flask>=3.0
+Werkzeug>=3.0
+
+# Removidos nesta fase: `nltk` e `spacy` eram declarados mas não importados em
+# nenhum módulo — instalação pesada, sem uso. O restante do pipeline
+# (anonimização, parsing GLPI, análise de log) usa apenas a Standard Library.

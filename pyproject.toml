@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ldp"
+version = "3.0.0"
+description = "Caixa Log Diagnostic Pipeline - assistente de triagem forense N1 para chamados 2CX/Caixa"
+readme = "SSD.md"
+requires-python = ">=3.10"
+dependencies = [
+    "scikit-learn>=1.3.0",
+    "numpy>=1.24.0",
+    # Flask 3.x: 2.3.x reads werkzeug.__version__, which Werkzeug 3 removed,
+    # so the older pair breaks as soon as a test client is created.
+    "Flask>=3.0",
+    "Werkzeug>=3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+]
+
+[project.scripts]
+ldp = "ldp.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["ldp*"]
+
+[tool.setuptools.package-data]
+"ldp.api" = ["templates/*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = [
+    "slow: performance tests over massive logs (deselect with '-m \"not slow\"')",
+]
