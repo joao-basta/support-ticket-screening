@@ -1,9 +1,14 @@
+import argparse
 import os
 import random
 import string
-import uuid
-from datetime import datetime, timedelta
-from typing import Dict, List, Tuple
+import sys
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional, Tuple
+
+#: Fixed epoch used for log timestamps when a seed is supplied, so that a
+#: seeded corpus is reproducible. None means "anchor to the current time".
+_BASE_TIME: Optional[datetime] = None
 
 # ---------------------------------------------------------
 # 1. FAKE PII GENERATORS
@@ -58,6 +63,20 @@ def _generate_fake_bank_code() -> str:
 def _generate_fake_contract_number() -> str:
     """Generate a fake supplier contract number."""
     return f"CT-{random.randint(100000, 999999)}"
+
+def _random_hex(length: int) -> str:
+    """Generate a random hex string.
+
+    Uses `random` rather than `uuid.uuid4()` so that seeding the module
+    actually makes the generated logs reproducible - uuid4 draws from the OS
+    entropy pool and ignores `random.seed`.
+    """
+    return "".join(random.choice("0123456789abcdef") for _ in range(length))
+
+def _generate_fake_time() -> str:
+    """Generate a fake time of occurrence in one of the formats analysts actually type."""
+    hour, minute = random.randint(0, 23), random.randint(0, 59)
+    return random.choice([f"{hour:02d}:{minute:02d}", f"{hour:02d}h{minute:02d}", f"{hour:02d}h"])
 
 # ---------------------------------------------------------
 # 2. DATA POOLS (pt-BR content)
@@ -257,6 +276,17 @@ DETALHES_NOISE_GENERATORS = [
 # single dash, greater-than). Blocks are joined with a blank line.
 # ---------------------------------------------------------
 
+#: Sentence appended to the narrative carrying the time of occurrence.
+#: Without it every FALHA_CHAMADA_AUDIO and FALHA_FILA_ROTEAMENTO mock was
+#: blocked on "Horário da ocorrência", so the generated corpus could never
+#: exercise the approved path at all.
+OCCURRENCE_TIME_TEMPLATES: List[str] = [
+    "O ocorrido foi registrado as {time}.",
+    "O incidente teve inicio as {time}.",
+    "Horario aproximado da falha: {time}.",
+    "Conforme apurado, o problema comecou as {time}.",
+]
+
 def _generate_detalhes_block(symptom: str) -> Tuple[str, str, str]:
     """Build the 'Detalhes:' block (detalhe1..detalhe11) and return it along
     with the AFFECTED agent ID/phone (Ctrl+F anchor for the log)."""
@@ -265,6 +295,9 @@ def _generate_detalhes_block(symptom: str) -> Tuple[str, str, str]:
 
     issue_description = random.choice(FORMAL_ISSUE_TEMPLATES[symptom]).format(
         agent_id=affected_agent_id, phone=affected_phone
+    )
+    issue_description += " " + random.choice(OCCURRENCE_TIME_TEMPLATES).format(
+        time=_generate_fake_time()
     )
 
     # detalhe2..detalhe11: at least one location (e.g. "Juiz de Fora"), the rest
@@ -354,7 +387,7 @@ def _log_event_sip() -> str:
     return f"DEBUG: SIP INVITE received from trunk gateway {_generate_fake_ip()}"
 
 def _log_event_session() -> str:
-    return f"INFO: Session {uuid.uuid4().hex[:12]} established on channel {random.randint(1, 48)}"
+    return f"INFO: Session {_random_hex(12)} established on channel {random.randint(1, 48)}"
 
 def _log_event_queue() -> str:
     return f"WARN: Queue {random.choice(LOG_SKILLS)} depth increased to {random.randint(1, 40)}"
@@ -366,7 +399,7 @@ def _log_event_heartbeat() -> str:
     return f"DEBUG: Heartbeat OK for node {random.choice(LOG_NODE_NAMES)}"
 
 def _log_event_call_bridge() -> str:
-    return f"INFO: Call {uuid.uuid4().hex[:10]} bridged successfully"
+    return f"INFO: Call {_random_hex(10)} bridged successfully"
 
 def _log_event_codec() -> str:
     return f"TRACE: Codec negotiation completed: {random.choice(LOG_CODECS)}"
@@ -393,7 +426,16 @@ def _generate_log_content(symptom: str, affected_phone: str) -> str:
     root_cause_index = random.randint(0, total_lines - 1)
     technical_error = random.choice(TECHNICAL_ROOT_CAUSE[symptom])
 
-    base_time = datetime.now() - timedelta(seconds=total_lines)
+    # A seeded run uses a fixed epoch so the corpus is byte-for-byte
+    # reproducible; an unseeded run stays anchored to now. Timestamps are UTC
+    # because they are emitted with a 'Z' suffix - the previous version
+    # stamped naive local time and labelled it as UTC.
+    if _BASE_TIME is not None:
+        base_time = _BASE_TIME
+    else:
+        base_time = datetime.now(timezone.utc).replace(tzinfo=None)
+    base_time -= timedelta(seconds=total_lines)
+
     lines = []
     for i in range(total_lines):
         ts = base_time + timedelta(seconds=i)
@@ -404,18 +446,26 @@ def _generate_log_content(symptom: str, affected_phone: str) -> str:
 
     return "\n".join(lines)
 
-def generate_mock_batch(output_dir: str, count: int) -> None:
+def generate_mock_batch(output_dir: str, count: int, seed: Optional[int] = None) -> None:
     """
     Orchestrate the bulk generation of test tickets and their matching logs.
 
     Args:
         output_dir: The directory where the files will be saved.
         count: The number of ticket/log pairs to generate.
+        seed: Optional RNG seed. Passing one makes the whole corpus
+            reproducible, which is what lets the test suite assert against
+            generated data instead of only smoke-testing it.
     """
+    global _BASE_TIME
+    if seed is not None:
+        random.seed(seed)
+        _BASE_TIME = datetime(2026, 1, 1, 12, 0, 0)
     print(f"--- Starting Test Mass Generation ({count} records) ---")
     os.makedirs(output_dir, exist_ok=True)
 
     symptoms = list(FORMAL_ISSUE_TEMPLATES.keys())
+    written = 0
 
     for _ in range(count):
         chosen_symptom = random.choice(symptoms)
@@ -433,17 +483,26 @@ def generate_mock_batch(output_dir: str, count: int) -> None:
             with open(log_filename, 'w', encoding='utf-8') as f:
                 f.write(log_content)
         except IOError as e:
-            print(f"[ERROR] Failed to write files for {base_filename}: {e}")
+            print(f"[ERROR] Failed to write files for {base_filename}: {e}", file=sys.stderr)
             continue
+        written += 1
 
-    print(f"\n[SUCCESS] {count} ticket/log pairs were generated in '{output_dir}'.")
+    # Report what was actually written. The previous message announced the
+    # requested count even when every single write had failed.
+    if written != count:
+        print(f"\n[WARNING] {count - written} pair(s) failed to write.", file=sys.stderr)
+    print(f"\n[SUCCESS] {written} ticket/log pairs were generated in '{output_dir}'.")
 
 if __name__ == "__main__":
-    # Usage example: `python tests/mock_generator.py`
-    # This generates 50 test files under the 'data/raw' directory.
-
-    # Ensures the path is relative to the project root.
+    # Usage: `py tests/mock_generator.py [--count N] [--seed N] [--out DIR]`
+    # Defaults to 50 pairs under 'data/raw' at the project root.
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    output_path = os.path.join(project_root, 'data', 'raw')
 
-    generate_mock_batch(output_dir=output_path, count=50)
+    parser = argparse.ArgumentParser(description="Gerador de massa de teste do LDP")
+    parser.add_argument('--count', type=int, default=50, help="Quantidade de pares chamado/log")
+    parser.add_argument('--seed', type=int, default=None, help="Semente para geração reproduzível")
+    parser.add_argument('--out', type=str, default=os.path.join(project_root, 'data', 'raw'),
+                        help="Diretório de saída")
+    cli_args = parser.parse_args()
+
+    generate_mock_batch(output_dir=cli_args.out, count=cli_args.count, seed=cli_args.seed)
