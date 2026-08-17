@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LDP — Triagem de Chamados</title>
+<style>
+  /* Tudo inline: o sistema roda 100% offline, sem CDN, fontes ou scripts externos. */
+  :root {
+    --bg: #f4f6f9; --panel: #ffffff; --ink: #16202c; --muted: #5c6b7d;
+    --line: #d8e0ea; --accent: #1d63c7; --accent-ink: #ffffff;
+    --ok: #1a7f4b; --ok-bg: #e6f5ec; --bad: #b3261e; --bad-bg: #fdeceb;
+    --warn: #91650c; --warn-bg: #fdf3e0; --code: #eef2f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10151c; --panel: #182029; --ink: #e6edf5; --muted: #9bacc0;
+      --line: #2b3745; --accent: #5b9bf5; --accent-ink: #0d1218;
+      --ok: #5ed69b; --ok-bg: #12321f; --bad: #ff9a92; --bad-bg: #3a1815;
+      --warn: #f0c063; --warn-bg: #382a10; --code: #111820;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1rem 4rem; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 ui-sans-serif, system-ui, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; }
+  header { margin-bottom: 1.5rem; }
+  h1 { margin: 0 0 .25rem; font-size: 1.5rem; letter-spacing: -.01em; }
+  .sub { color: var(--muted); font-size: .92rem; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 1.15rem; margin-bottom: 1.15rem;
+  }
+  h2 { margin: 0 0 .75rem; font-size: 1rem; text-transform: uppercase;
+       letter-spacing: .06em; color: var(--muted); }
+  label { display: block; font-weight: 600; margin-bottom: .35rem; font-size: .9rem; }
+  textarea, input[type=file] {
+    width: 100%; padding: .65rem .75rem; border: 1px solid var(--line);
+    border-radius: 7px; background: var(--bg); color: var(--ink);
+    font: inherit; resize: vertical;
+  }
+  textarea { min-height: 170px; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+  .row { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; margin-top: .9rem; }
+  button {
+    font: inherit; font-weight: 600; padding: .6rem 1.1rem; border-radius: 7px;
+    border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink);
+    cursor: pointer;
+  }
+  button.ghost { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .55; cursor: progress; }
+  .samples { display: flex; gap: .45rem; flex-wrap: wrap; margin-top: .6rem; }
+  .samples button {
+    font-size: .8rem; font-weight: 500; padding: .32rem .7rem;
+    border-color: var(--line); background: var(--bg); color: var(--ink);
+  }
+  .badge {
+    display: inline-block; padding: .28rem .7rem; border-radius: 999px;
+    font-weight: 700; font-size: .82rem; letter-spacing: .03em;
+  }
+  .APROVADO  { background: var(--ok-bg);   color: var(--ok);   }
+  .BLOQUEADO { background: var(--bad-bg);  color: var(--bad);  }
+  .ATENCAO   { background: var(--warn-bg); color: var(--warn); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .8rem; margin: 1rem 0; }
+  .cell { border: 1px solid var(--line); border-radius: 8px; padding: .7rem .8rem; }
+  .cell .k { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .cell .v { font-size: 1.02rem; font-weight: 650; margin-top: .2rem; word-break: break-word; }
+  .meter { height: 6px; border-radius: 3px; background: var(--line); margin-top: .45rem; overflow: hidden; }
+  .meter > i { display: block; height: 100%; background: var(--accent); }
+  ul.checks { list-style: none; padding: 0; margin: .5rem 0 0; }
+  ul.checks li { padding: .42rem 0; border-bottom: 1px solid var(--line); display: flex; gap: .55rem; }
+  ul.checks li:last-child { border-bottom: 0; }
+  .mark { font-weight: 700; min-width: 4.6rem; }
+  .mark.y { color: var(--ok); } .mark.n { color: var(--bad); }
+  .note { padding: .7rem .85rem; border-radius: 7px; margin-top: .9rem; font-size: .9rem; }
+  .note.warn { background: var(--warn-bg); color: var(--warn); }
+  .note.ok   { background: var(--ok-bg);   color: var(--ok);   }
+  .note.bad  { background: var(--bad-bg);  color: var(--bad);  }
+  pre {
+    background: var(--code); border: 1px solid var(--line); border-radius: 7px;
+    padding: .8rem; overflow-x: auto; font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px; margin: 0;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: .87rem; margin-top: .5rem; display: block; overflow-x: auto; }
+  th, td { text-align: left; padding: .42rem .5rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-size: .74rem; text-transform: uppercase; letter-spacing: .05em; }
+  td.excerpt { white-space: normal; font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; }
+  details { margin-top: .9rem; } summary { cursor: pointer; color: var(--accent); font-weight: 600; font-size: .9rem; }
+  .matrix { font-size: .87rem; color: var(--muted); }
+  .matrix code { background: var(--code); padding: .1rem .35rem; border-radius: 4px; color: var(--ink); }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>LDP — Triagem Forense de Chamados</h1>
+    <div class="sub">2CX / Caixa · pipeline 100% offline · sanitização LGPD antes de qualquer análise</div>
+  </header>
+
+  <form class="panel" id="form">
+    <h2>Chamado</h2>
+    <label for="texto">Texto do chamado (aceita layout GLPI com blocos e <code>chave -&gt; valor</code>)</label>
+    <textarea id="texto" name="texto" placeholder="Cole aqui o corpo do chamado..."></textarea>
+
+    <div class="samples">
+      <button type="button" data-sample="audio_ok">Áudio — completo</button>
+      <button type="button" data-sample="audio_sem_fone">Áudio — sem telefone</button>
+      <button type="button" data-sample="protocolo">Protocolo ≠ telefone</button>
+      <button type="button" data-sample="celular">Celular 11 dígitos</button>
+      <button type="button" data-sample="ux">Interface / UX</button>
+      <button type="button" data-sample="fila">Fila / roteamento</button>
+      <button type="button" data-sample="glpi">Layout GLPI completo</button>
+      <button type="button" data-sample="rejeito">Fora de escopo</button>
+    </div>
+
+    <div style="margin-top:1rem">
+      <label for="anexos">Anexos (logs .txt/.log/.csv/.json, imagens .png/.jpg/.pdf, ou .zip)</label>
+      <input type="file" id="anexos" name="anexos" multiple>
+    </div>
+
+    <div class="row">
+      <button type="submit" id="run">Analisar chamado</button>
+      <button type="button" class="ghost" id="clear">Limpar</button>
+      <span class="sub" id="hint"></span>
+    </div>
+  </form>
+
+  <div id="out" class="hidden"></div>
+
+  <div class="panel">
+    <h2>Matriz de validação vigente</h2>
+    <div class="matrix">
+      {% for s in symptoms %}
+        <div style="margin-bottom:.4rem">
+          <code>{{ s.codigo }}</code> — {{ s.descricao }}:
+          {% if s.evidencias %}exige {{ s.evidencias | join(' + ') }}{% else %}sem exigências{% endif %}
+        </div>
+      {% endfor %}
+      <div style="margin-top:.7rem">
+        Códigos de saída: <code>0</code> aprovado · <code>1</code> bloqueado ·
+        <code>2</code> análise humana · <code>3</code> erro.
+        HTTP <code>200</code> aprovado/atenção, <code>422</code> bloqueado.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const SAMPLES = {
+  audio_ok: "A ligacao do agente p125413 caiu no meio do atendimento as 14:30. O telefone afetado e (11) 98765-4321. Cliente relatou voz muda antes da queda.",
+  audio_sem_fone: "A ligacao caiu no meio do atendimento as 14:30, o cliente reclamou de audio picotando.",
+  // Regressao: numero de protocolo NAO pode valer como evidencia de telefone.
+  protocolo: "Sem audio na ligacao as 14:30, conforme protocolo 1234567890 aberto ontem.",
+  // Regressao: celular BR de 11 digitos e telefone, nao CPF.
+  celular: "A ligacao caiu no meio da chamada as 14:30, telefone 11987654321 do agente afetado.",
+  ux: "O botao travou e a tela ficou branca ao gerar o relatorio. Segue print da tela em anexo.",
+  fila: "Agentes disponiveis mas clientes parados na fila desde as 09h15, roteamento nao distribui.",
+  rejeito: "Solicito aumento de salario e agendamento de ferias para o proximo mes.",
+  glpi: [
+    "Detalhes:",
+    "detalhe1 -> Prezado suporte, a ligacao do agente matricula p125413 caiu no meio do atendimento as 14:30. O telefone afetado e (11) 98765-4321.",
+    "detalhe2 -> 192.168.240.90",
+    "detalhe3 -> TEL: 987654321",
+    "detalhe4 -> Aguardando Retorno do Cliente",
+    "",
+    "Info Solicitante:",
+    "contatonome -> Maria Silva",
+    "contatotelefone -> (21) 3344-5566",
+    "contatoemail -> p999888@corp.caixa.gov.br",
+    "",
+    "Info Arquivo:",
+    "anexo -> Nenhum anexo informado"
+  ].join("\n")
+};
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+
+document.querySelectorAll("[data-sample]").forEach(b =>
+  b.addEventListener("click", () => { $("texto").value = SAMPLES[b.dataset.sample]; }));
+
+$("clear").addEventListener("click", () => {
+  $("texto").value = ""; $("anexos").value = ""; $("out").className = "hidden"; $("hint").textContent = "";
+});
+
+$("form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const texto = $("texto").value.trim();
+  if (!texto) { $("hint").textContent = "Informe o texto do chamado."; return; }
+
+  $("run").disabled = true;
+  $("hint").textContent = "Analisando...";
+  const body = new FormData();
+  body.append("texto", texto);
+  for (const f of $("anexos").files) body.append("anexos", f);
+
+  try {
+    const res = await fetch("/api/v1/screenings", { method: "POST", body });
+    const data = await res.json();
+    $("hint").textContent = "HTTP " + res.status;
+    render(data, res.status);
+  } catch (err) {
+    $("hint").textContent = "";
+    $("out").className = "";
+    $("out").innerHTML = '<div class="panel"><div class="note bad">Falha na requisicao: ' + esc(err.message) + "</div></div>";
+  } finally {
+    $("run").disabled = false;
+  }
+});
+
+function render(d, httpStatus) {
+  const out = $("out");
+  out.className = "";
+
+  if (!d.status) { // RFC 7807 problem document
+    out.innerHTML = '<div class="panel"><h2>Erro</h2><div class="note bad">' +
+      esc(d.title || "Erro") + (d.detail ? " — " + esc(d.detail) : "") +
+      '</div><pre>' + esc(JSON.stringify(d, null, 2)) + "</pre></div>";
+    return;
+  }
+
+  const pct = (d.confianca * 100).toFixed(1);
+  let h = '<div class="panel">';
+  h += '<h2>Resultado</h2>';
+  h += '<span class="badge ' + esc(d.status) + '">' + esc(d.status) + "</span> ";
+  h += '<span class="sub">HTTP ' + httpStatus + " · saída " + d.codigo_saida + "</span>";
+
+  h += '<div class="grid">';
+  h += cell("Chamado", esc(d.chamado));
+  h += '<div class="cell"><div class="k">Sintoma inferido</div><div class="v">' +
+       esc(d.sintoma.descricao) + '</div><div class="sub">' + esc(d.sintoma.codigo) + '</div>' +
+       '<div class="meter"><i style="width:' + pct + '%"></i></div>' +
+       '<div class="sub">Confiança ' + pct + "%</div></div>";
+  h += cell("Anexos", d.anexos.logs + " log · " + d.anexos.visuais + " visual · " + d.anexos.outros + " outro");
+  const pii = Object.entries(d.dados_sensiveis || {});
+  h += cell("Dados sensíveis", pii.length ? pii.map(([k, v]) => esc(k) + "×" + v).join(", ") : "nenhum");
+  h += "</div>";
+
+  h += '<div class="note ' + (d.status === "APROVADO" ? "ok" : d.status === "BLOQUEADO" ? "bad" : "warn") +
+       '"><strong>Ação necessária:</strong> ' + esc(d.acao_necessaria);
+  if (d.pendencias.length) h += "<br><strong>Pendências:</strong> " + d.pendencias.map(esc).join(", ");
+  h += "</div>";
+
+  if (d.evidencias.length) {
+    h += "<h2 style='margin-top:1.2rem'>Evidências exigidas</h2><ul class='checks'>";
+    for (const e of d.evidencias) {
+      h += '<li><span class="mark ' + (e.atendida ? "y" : "n") + '">' +
+           (e.atendida ? "OK" : "FALTA") + "</span><span>" + esc(e.item) + "</span></li>";
+    }
+    h += "</ul>";
+  }
+  h += "</div>";
+
+  const al = d.analise_log;
+  if (al) {
+    h += '<div class="panel"><h2>Análise de log</h2>';
+    h += '<div class="sub">' + al.ocorrencias + " ocorrência(s) em " + al.arquivos_lidos +
+         " arquivo(s)" + (al.truncado ? " (exibindo as primeiras)" : "") + "</div>";
+    if (al.confere_com_texto === true)
+      h += '<div class="note ok">Causa técnica no log confirma o sintoma relatado.</div>';
+    else if (al.confere_com_texto === false)
+      h += '<div class="note warn">DIVERGÊNCIA: o log aponta <strong>' + esc(al.causa_dominante) +
+           "</strong>, mas o texto indica <strong>" + esc(d.sintoma.codigo) + "</strong>.</div>";
+    else if (al.causa_dominante)
+      h += '<div class="note warn">O texto não permitiu inferir o sintoma; o log aponta <strong>' +
+           esc(al.causa_dominante) + "</strong>.</div>";
+
+    if (al.ocorrencias_detalhadas.length) {
+      h += "<table><thead><tr><th>Arquivo</th><th>Linha</th><th>Tipo</th><th>Trecho</th></tr></thead><tbody>";
+      for (const o of al.ocorrencias_detalhadas) {
+        h += "<tr><td>" + esc(o.arquivo) + "</td><td>" + o.linha + "</td><td>" +
+             esc(o.tipo) + '</td><td class="excerpt">' + esc(o.trecho) + "</td></tr>";
+      }
+      h += "</tbody></table>";
+    }
+    h += "</div>";
+  }
+
+  h += '<div class="panel"><h2>Texto analisado (pós-sanitização)</h2><pre>' +
+       esc(d.texto_analisado) + "</pre>";
+  if (d.blocos_descartados && d.blocos_descartados.length)
+    h += '<div class="sub" style="margin-top:.6rem">Blocos GLPI descartados da análise: ' +
+         d.blocos_descartados.map(esc).join(", ") + "</div>";
+  h += "<details><summary>Ver JSON completo</summary><pre>" +
+       esc(JSON.stringify(d, null, 2)) + "</pre></details></div>";
+
+  out.innerHTML = h;
+  out.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function cell(k, v) {
+  return '<div class="cell"><div class="k">' + k + '</div><div class="v">' + v + "</div></div>";
+}
+</script>
+</body>
+</html>
